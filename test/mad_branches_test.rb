@@ -21,7 +21,7 @@ class MadBranchesTest < Minitest::Test
     assert_includes names, "feat-a"
     assert_includes names, "feat-b"
     assert_includes names, "feat-c"
-    refute_includes names, "main"
+    assert_includes names, "main"
   end
 
   def test_includes_worktree_paths

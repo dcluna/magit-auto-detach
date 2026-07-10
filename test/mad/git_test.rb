@@ -38,7 +38,7 @@ class Mad::GitTest < Minitest::Test
 
   def test_commits_in_range
     commits = @git.commits_in_range("main", "feat-c")
-    assert_equal 4, commits.length
+    assert_equal 5, commits.length
   end
 
   def test_branches_at

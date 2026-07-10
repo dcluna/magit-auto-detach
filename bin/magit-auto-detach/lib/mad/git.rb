@@ -29,7 +29,11 @@ module Mad
 
     def commits_in_range(base, tip)
       output = run("log", "--first-parent", "--format=%H", "#{base}..#{tip}")
-      output.split("\n").reject(&:empty?)
+      commits = output.split("\n").reject(&:empty?)
+      # Include the base commit itself so branches at the base ref get found
+      base_sha = rev_parse(base)
+      commits << base_sha unless commits.include?(base_sha)
+      commits
     end
 
     def branches_at(sha)
