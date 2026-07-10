@@ -4,10 +4,12 @@
 (require 'json)
 
 ;; Load the package under test
-(load (expand-file-name "~/ghq/github.com/dcluna/dotfiles/elisp/magit-auto-detach.el"))
+(load (expand-file-name "../magit-auto-detach.el"
+                        (file-name-directory (or load-file-name buffer-file-name))))
 
 (defvar mad-test--bin-dir
-  (expand-file-name "~/ghq/github.com/dcluna/dotfiles/bin/magit-auto-detach"))
+  (expand-file-name "../bin/magit-auto-detach"
+                    (file-name-directory (or load-file-name buffer-file-name))))
 
 (defun mad-test--create-repo (dir)
   "Create test repo in DIR with branches and worktrees.

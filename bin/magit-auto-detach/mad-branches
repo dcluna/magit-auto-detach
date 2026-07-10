@@ -1,0 +1,44 @@
+#!/usr/bin/env ruby
+require_relative "lib/mad/git"
+require "json"
+require "optparse"
+require "set"
+
+repo = nil
+OptionParser.new do |opts|
+  opts.banner = "Usage: mad-branches <base-ref> <tip-ref> [--repo <path>]"
+  opts.on("--repo PATH", "Repository path") { |v| repo = v }
+end.parse!
+
+base_ref, tip_ref = ARGV.shift(2)
+abort "Usage: mad-branches <base-ref> <tip-ref> [--repo <path>]" unless base_ref && tip_ref
+
+repo ||= `git rev-parse --show-toplevel 2>/dev/null`.strip
+abort "Not in a git repository" if repo.empty?
+
+git = Mad::Git.new(repo)
+
+unless git.ancestor?(git.rev_parse(base_ref), git.rev_parse(tip_ref))
+  $stderr.puts "Error: #{base_ref} is not an ancestor of #{tip_ref}"
+  exit 1
+end
+
+commits = git.commits_in_range(base_ref, tip_ref)
+worktree_map = git.worktree_branches
+
+results = []
+seen_branches = Set.new
+
+commits.each do |sha|
+  git.branches_at(sha).each do |branch|
+    next if seen_branches.include?(branch)
+    seen_branches.add(branch)
+    results << {
+      "branch" => branch,
+      "sha" => sha,
+      "worktree" => worktree_map[branch]
+    }
+  end
+end
+
+puts JSON.pretty_generate(results)

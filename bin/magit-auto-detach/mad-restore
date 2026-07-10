@@ -1,0 +1,54 @@
+#!/usr/bin/env ruby
+require_relative "lib/mad/git"
+require_relative "lib/mad/state"
+require "json"
+require "optparse"
+
+repo = nil
+dry_run = false
+OptionParser.new do |opts|
+  opts.banner = "Usage: mad-restore [--repo <path>] [--dry-run]"
+  opts.on("--repo PATH", "Repository path") { |v| repo = v }
+  opts.on("--dry-run", "Show what would be restored") { dry_run = true }
+end.parse!
+
+repo ||= `git rev-parse --show-toplevel 2>/dev/null`.strip
+abort "Not in a git repository" if repo.empty?
+
+git = Mad::Git.new(repo)
+state_path = File.join(git.common_dir, "magit-auto-detach.json")
+state = Mad::State.new(state_path)
+
+unless state.exists?
+  puts JSON.pretty_generate({ "message" => "Nothing to restore" })
+  exit 0
+end
+
+entries = state.entries
+
+if dry_run
+  puts JSON.pretty_generate({ "would_restore" => entries })
+  exit 0
+end
+
+restored = []
+failures = []
+
+entries.each do |entry|
+  begin
+    git.checkout_branch(entry["worktree"], entry["branch"])
+    state.remove_entry(entry["worktree"])
+    restored << entry
+  rescue Mad::Git::CommandError => e
+    failures << { "worktree" => entry["worktree"], "branch" => entry["branch"], "error" => e.message }
+    $stderr.puts "Failed to restore #{entry['worktree']}: #{e.message}"
+  end
+end
+
+state.delete if state.exists? && state.empty?
+
+result = { "restored" => restored }
+result["failures"] = failures if failures.any?
+puts JSON.pretty_generate(result)
+
+exit(failures.any? ? 1 : 0)

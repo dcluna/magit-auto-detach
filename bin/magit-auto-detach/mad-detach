@@ -1,0 +1,96 @@
+#!/usr/bin/env ruby
+require_relative "lib/mad/git"
+require_relative "lib/mad/state"
+require "json"
+require "optparse"
+require "set"
+
+repo = nil
+dry_run = false
+OptionParser.new do |opts|
+  opts.banner = "Usage: mad-detach <base-ref> <tip-ref> [--repo <path>] [--dry-run]"
+  opts.on("--repo PATH", "Repository path") { |v| repo = v }
+  opts.on("--dry-run", "Show what would be detached") { dry_run = true }
+end.parse!
+
+base_ref, tip_ref = ARGV.shift(2)
+abort "Usage: mad-detach <base-ref> <tip-ref> [--repo <path>] [--dry-run]" unless base_ref && tip_ref
+
+repo ||= `git rev-parse --show-toplevel 2>/dev/null`.strip
+abort "Not in a git repository" if repo.empty?
+
+git = Mad::Git.new(repo)
+
+unless git.ancestor?(git.rev_parse(base_ref), git.rev_parse(tip_ref))
+  $stderr.puts "Error: #{base_ref} is not an ancestor of #{tip_ref}"
+  exit 1
+end
+
+state_path = File.join(git.common_dir, "magit-auto-detach.json")
+state = Mad::State.new(state_path)
+
+if state.exists?
+  $stderr.puts "Error: State file already exists from a previous session. Run mad-restore first."
+  $stderr.puts "State file: #{state_path}"
+  exit 1
+end
+
+commits = git.commits_in_range(base_ref, tip_ref)
+worktree_map = git.worktree_branches
+seen = Set.new
+to_detach = []
+
+commits.each do |sha|
+  git.branches_at(sha).each do |branch|
+    next if seen.include?(branch)
+    seen.add(branch)
+    wt = worktree_map[branch]
+    to_detach << { "branch" => branch, "sha" => sha, "worktree" => wt } if wt
+  end
+end
+
+if to_detach.empty?
+  puts JSON.pretty_generate({ "detached" => [], "message" => "No worktrees to detach" })
+  exit 0
+end
+
+if dry_run
+  puts JSON.pretty_generate({ "would_detach" => to_detach })
+  exit 0
+end
+
+state.create(base_ref: base_ref, tip_ref: tip_ref)
+detached = []
+
+begin
+  to_detach.each do |entry|
+    git.checkout_detach(entry["worktree"])
+    state.append_entry(worktree: entry["worktree"], branch: entry["branch"])
+    detached << entry
+  end
+rescue Mad::Git::CommandError => e
+  $stderr.puts "Error detaching: #{e.message}"
+  $stderr.puts "Rolling back #{detached.length} detached worktree(s)..."
+
+  rollback_failures = []
+  state.entries.each do |st_entry|
+    begin
+      git.checkout_branch(st_entry["worktree"], st_entry["branch"])
+    rescue Mad::Git::CommandError => re
+      rollback_failures << { "worktree" => st_entry["worktree"], "error" => re.message }
+    end
+  end
+
+  state.delete
+
+  if rollback_failures.any?
+    $stderr.puts "Rollback failures:"
+    rollback_failures.each { |f| $stderr.puts "  #{f['worktree']}: #{f['error']}" }
+    exit 2
+  else
+    $stderr.puts "Rollback successful."
+    exit 1
+  end
+end
+
+puts JSON.pretty_generate({ "detached" => detached })

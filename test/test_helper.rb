@@ -4,9 +4,9 @@ require "json"
 require "fileutils"
 require "shellwords"
 
-$LOAD_PATH.unshift(File.expand_path("~/ghq/github.com/dcluna/dotfiles/bin/magit-auto-detach/lib"))
+$LOAD_PATH.unshift(File.expand_path("../bin/magit-auto-detach/lib", __dir__))
 
-BIN_DIR = File.expand_path("~/ghq/github.com/dcluna/dotfiles/bin/magit-auto-detach")
+BIN_DIR = File.expand_path("../bin/magit-auto-detach", __dir__)
 
 module RepoFixture
   def create_test_repo(dir)
