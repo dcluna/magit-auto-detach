@@ -36,8 +36,9 @@ ref selection.
   `magit-read-branch-or-commit`, transient menu entries.
 - **Ruby scripts** handle all git operations: finding branches, detaching,
   restoring, state management.
-- **State file** lives at `.git/magit-auto-detach.json` in each repo — tool is
-  project-agnostic.
+- **State file** lives at `<git-common-dir>/magit-auto-detach.json` (resolved via
+  `git rev-parse --git-common-dir`) — always the real `.git` directory, even when
+  invoked from a worktree. Tool is project-agnostic.
 
 ## Ruby Scripts
 
@@ -59,10 +60,17 @@ Output (JSON to stdout):
 ]
 ```
 
+Preconditions:
+- `base` must be an ancestor of `tip` (validated with `git merge-base --is-ancestor`)
+- Tool assumes a **linear history** between base and tip. Merge commits in the
+  range may cause unexpected branches to be included.
+
 Algorithm:
-1. `git log --format=%H base..tip` → all commits in range
+1. `git log --first-parent --format=%H base..tip` → commits in range (linear)
 2. For each commit: `git branch --points-at <sha>` → branches
-3. Parse `git worktree list --porcelain` → map branch → worktree path
+3. Parse `git worktree list --porcelain` → map branch → worktree path. Only
+   worktrees with a `branch` field are candidates; already-detached worktrees
+   are ignored.
 4. Return all matches; `worktree: null` for branches without a worktree
 
 ### `mad-detach`
@@ -79,10 +87,17 @@ Steps:
 2. If state file already exists, refuse with error (previous session not restored)
 3. Create state file with metadata (created_at, base_ref, tip_ref, empty entries)
 4. For each worktree with a branch:
-   a. Append entry to state file **before** detaching
-   b. `git -C <worktree> checkout --detach`
-   c. On failure: rollback all previously detached entries, exit 1 or 2
+   a. `git -C <worktree> checkout --detach`
+   b. On success: append entry to state file **after** successful detach
+   c. On failure: rollback all entries already in state file (all confirmed
+      detached), exit 1 or 2
 5. Print summary to stdout (JSON)
+
+Note: entries are written after detach (not before) so the state file only
+contains worktrees that are actually detached. If the process crashes between
+a successful detach and the file write, one worktree may be detached without
+a state record — `mad-restore` won't know about it. This is the safer
+trade-off: rollback never attempts to restore a worktree that wasn't detached.
 
 ### `mad-restore`
 
@@ -102,10 +117,11 @@ Steps:
 
 ### State file format
 
-Location: `<repo>/.git/magit-auto-detach.json`
+Location: `<git-common-dir>/magit-auto-detach.json` (via `git rev-parse --git-common-dir`)
 
 ```json
 {
+  "version": 1,
   "created_at": "2026-07-10T12:00:00Z",
   "base_ref": "develop",
   "tip_ref": "feat-c",
@@ -116,20 +132,26 @@ Location: `<repo>/.git/magit-auto-detach.json`
 }
 ```
 
+When `--repo` is omitted, scripts default to the current directory's repo root
+via `git rev-parse --show-toplevel`.
+
 Lifecycle:
-- `mad-detach` creates file, appends entries incrementally
+- `mad-detach` creates file, appends entries after each successful detach
 - `mad-restore` removes entries as they succeed, deletes file when empty
 - File is source of truth for "what still needs restoring"
 - Survives Emacs restarts
+
+Concurrency: single-user tool, no file locking. Running two `mad-detach`
+invocations concurrently on the same repo is unsupported.
 
 ## Failure Handling
 
 ### Detach fails midway
 
 Detached A, B successfully; C fails:
-1. Read state file (has A, B, C entries — C was written before detach attempt)
-2. Rollback: `git -C <wt> checkout <branch>` for A, B, C
-3. If rollback entry fails: log but continue rolling back rest
+1. State file contains A, B (only successfully detached entries)
+2. Rollback: `git -C <wt> checkout <branch>` for A and B only
+3. If a rollback entry fails: log but continue rolling back rest
 4. Delete state file after rollback
 5. Exit 1 if rollback succeeded, exit 2 if rollback had failures
 
@@ -247,8 +269,17 @@ test-auto-detach-repo/
 - `magit-auto-detach-restore` parses output correctly
 - `magit-auto-detach-status` reads and displays state
 
+## Assumptions
+
+- Any ref that resolves to a commit is valid as `base-ref` (tag, SHA, branch,
+  remote ref). Only `tip-ref` branches and local branches in the range are
+  considered for detaching.
+- `git worktree lock` does not prevent checkout changes — locked worktrees are
+  handled normally.
+
 ## Out of scope
 
 - Automatic restore via magit hooks (manual only, per requirement)
 - Handling bare repos or repos without worktree support
 - Remote branch tracking
+- Non-linear (merge-heavy) branch stacks
