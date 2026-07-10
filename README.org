@@ -1,0 +1,120 @@
+#+TITLE: magit-auto-detach
+#+AUTHOR: Daniel Luna
+
+Auto-detach and restore git worktrees for rebasing branch stacks.
+
+* Problem
+
+Rebasing a stack of branches with =--update-refs= fails when any branch in the
+stack is checked out in a git worktree. Git refuses to rewrite a branch that's
+currently checked out elsewhere.
+
+Manual workflow: detach each worktree HEAD, rebase, re-checkout. Tedious and
+error-prone with many worktrees.
+
+* Solution
+
+Given a ref range (base..tip), this tool:
+
+1. Finds all local branches pointing to commits in the range
+2. Detaches worktrees checked out on those branches
+3. Persists the mapping to a state file
+4. Restores worktrees to their original branches on command
+
+* Usage
+
+** From Magit
+
+The package adds entries to the worktree transient (=W=):
+
+| Key   | Command                         | Description                      |
+|-------+---------------------------------+----------------------------------|
+| =W d= | =magit-auto-detach-detach=      | Detach worktrees in a ref range  |
+| =W r= | =magit-auto-detach-restore=     | Restore previously detached      |
+| =W s= | =magit-auto-detach-status=      | Show active detach session       |
+
+** From the command line
+
+#+begin_src sh
+# Find branches with worktrees in range
+ruby bin/magit-auto-detach/mad-branches main feat-c --repo /path/to/repo
+
+# Detach all worktrees in range
+ruby bin/magit-auto-detach/mad-detach main feat-c --repo /path/to/repo
+
+# Restore all detached worktrees
+ruby bin/magit-auto-detach/mad-restore --repo /path/to/repo
+#+end_src
+
+** Typical workflow
+
+#+begin_src sh
+# 1. Detach worktrees so rebase can rewrite branches
+M-x magit-auto-detach-detach  (or W d)
+# Pick base ref: main
+# Pick tip ref: feat-c
+
+# 2. Rebase with --update-refs
+git rebase -i --update-refs main
+
+# 3. Restore worktrees to their (now rewritten) branches
+M-x magit-auto-detach-restore  (or W r)
+#+end_src
+
+* Installation
+
+Add the project directory to your =load-path= and require the package:
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/magit-auto-detach")
+(require 'magit-auto-detach)
+#+end_src
+
+Requires Ruby for the backend scripts. No gem dependencies.
+
+* Architecture
+
+#+begin_example
+magit-auto-detach.el                  -- Emacs/Magit UI integration
+bin/magit-auto-detach/
+  mad-branches                        -- find branches in ref range
+  mad-detach                          -- detach worktrees, write state
+  mad-restore                         -- restore worktrees, clean state
+  lib/mad/
+    git.rb                            -- git command wrappers
+    state.rb                          -- JSON state file management
+#+end_example
+
+- *Elisp* handles magit integration: interactive commands, ref selection, transient menu
+- *Ruby scripts* handle git operations: finding branches, detaching, restoring, state management
+- *State file* lives at =<git-common-dir>/magit-auto-detach.json= — survives Emacs restarts, works correctly from any worktree
+
+** State file lifecycle
+
+1. =mad-detach= creates the file, appends entries after each successful detach
+2. =mad-restore= removes entries as they succeed, deletes file when empty
+3. If detach fails midway, already-detached worktrees are rolled back
+
+** Exit codes
+
+| Script       | 0              | 1                           | 2                    |
+|--------------+----------------+-----------------------------+----------------------|
+| =mad-detach= | all detached   | failure (rollback succeeded) | rollback also failed |
+| =mad-restore= | all restored  | partial restore              |                      |
+
+* Running tests
+
+#+begin_src sh
+# Ruby unit + integration tests (39 tests)
+bundle install
+bundle exec rake test
+
+# ERT tests (4 tests, requires Emacs with magit installed)
+emacs --batch -L . -L /path/to/magit/ ... \
+  -l test/magit-auto-detach-test.el \
+  -f ert-run-tests-batch-and-exit
+#+end_src
+
+* License
+
+GPL-3.0-or-later
