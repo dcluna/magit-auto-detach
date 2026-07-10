@@ -10,6 +10,8 @@ BIN_DIR = File.expand_path("~/ghq/github.com/dcluna/dotfiles/bin/magit-auto-deta
 
 module RepoFixture
   def create_test_repo(dir)
+    # Resolve symlinks (macOS /var -> /private/var) so paths match git output
+    dir = File.realpath(dir)
     repo = File.join(dir, "repo")
     FileUtils.mkdir_p(repo)
 
@@ -17,9 +19,13 @@ module RepoFixture
     git(repo, "config", "user.email", "test@test.com")
     git(repo, "config", "user.name", "Test")
 
+    # Commit A on main -- main stays here
     File.write(File.join(repo, "a.txt"), "a")
     git(repo, "add", "a.txt")
     git(repo, "commit", "-m", "A")
+
+    # Detach so further commits don't advance main
+    git(repo, "checkout", "--detach")
 
     File.write(File.join(repo, "b.txt"), "b")
     git(repo, "add", "b.txt")
@@ -43,8 +49,6 @@ module RepoFixture
     git(repo, "worktree", "add", File.join(dir, "wt-feat-a"), "feat-a")
     git(repo, "worktree", "add", File.join(dir, "wt-feat-b"), "feat-b")
     git(repo, "worktree", "add", File.join(dir, "wt-feat-c"), "feat-c")
-
-    git(repo, "checkout", "--detach")
 
     repo
   end
