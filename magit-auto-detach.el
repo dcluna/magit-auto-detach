@@ -54,8 +54,10 @@
 Uses `magit-read-branch-or-commit' for ref selection."
   (interactive
    (list (magit-read-branch-or-commit "Base ref (ancestor)")
-         (magit-read-branch-or-commit "Tip ref"
-                                      (magit-get-current-branch))))
+         (magit-completing-read "Tip ref"
+                              (magit-list-refnames nil t)
+                              nil 'any nil 'magit-revision-history
+                              (magit-get-current-branch))))
   (pcase-let ((`(,code ,stdout ,stderr) (magit-auto-detach--run "mad-detach" base-ref tip-ref)))
     (cond
      ((= code 0)
