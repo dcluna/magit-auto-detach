@@ -29,11 +29,7 @@ end
 state_path = File.join(git.common_dir, "magit-auto-detach.json")
 state = Mad::State.new(state_path)
 
-if state.exists?
-  $stderr.puts "Error: State file already exists from a previous session. Run mad-restore first."
-  $stderr.puts "State file: #{state_path}"
-  exit 1
-end
+already_detached = state.exists? ? state.branches : Set.new
 
 commits = git.commits_in_range(base_ref, tip_ref)
 worktree_map = git.worktree_branches
@@ -44,6 +40,7 @@ commits.each do |sha|
   git.branches_at(sha).each do |branch|
     next if seen.include?(branch)
     seen.add(branch)
+    next if already_detached.include?(branch)
     wt = worktree_map[branch]
     to_detach << { "branch" => branch, "sha" => sha, "worktree" => wt } if wt
   end
@@ -59,7 +56,7 @@ if dry_run
   exit 0
 end
 
-state.create(base_ref: base_ref, tip_ref: tip_ref)
+state.create_or_open(base_ref: base_ref, tip_ref: tip_ref)
 detached = []
 
 begin
@@ -73,15 +70,16 @@ rescue Mad::Git::CommandError => e
   $stderr.puts "Rolling back #{detached.length} detached worktree(s)..."
 
   rollback_failures = []
-  state.entries.each do |st_entry|
+  detached.each do |d_entry|
     begin
-      git.checkout_branch(st_entry["worktree"], st_entry["branch"])
+      git.checkout_branch(d_entry["worktree"], d_entry["branch"])
+      state.remove_entry(d_entry["worktree"])
     rescue Mad::Git::CommandError => re
-      rollback_failures << { "worktree" => st_entry["worktree"], "error" => re.message }
+      rollback_failures << { "worktree" => d_entry["worktree"], "error" => re.message }
     end
   end
 
-  state.delete
+  state.delete if state.empty?
 
   if rollback_failures.any?
     $stderr.puts "Rollback failures:"

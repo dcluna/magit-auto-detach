@@ -117,10 +117,12 @@ Uses `magit-read-branch-or-commit' for ref selection."
                       (buffer-string))
                     :object-type 'alist))
              (entries (alist-get 'entries data))
-             (base (alist-get 'base_ref data))
-             (tip (alist-get 'tip_ref data)))
-        (message "Detach session: %s..%s (%d worktree(s))\n%s"
-                 base tip (length entries)
+             (ranges (alist-get 'ranges data))
+             (range-str (mapconcat (lambda (r)
+                                     (format "%s..%s" (aref r 0) (aref r 1)))
+                                   ranges ", ")))
+        (message "Detach session: %s (%d worktree(s))\n%s"
+                 range-str (length entries)
                  (mapconcat (lambda (e)
                               (format "  %s → %s"
                                       (alist-get 'worktree e)

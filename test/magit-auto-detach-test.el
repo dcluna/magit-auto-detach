@@ -111,16 +111,17 @@ Returns (exit-code stdout stderr)."
           (should (equal "feat-c" (mad-test--worktree-branch (expand-file-name "wt-feat-c" dir)))))
       (delete-directory dir t))))
 
-(ert-deftest mad-test-detach-refuses-with-existing-state ()
-  "Second detach should fail when state file exists."
+(ert-deftest mad-test-incremental-detach ()
+  "Second detach should merge into existing state, skipping already-detached."
   (let ((dir (file-truename (make-temp-file "mad-ert-" t))))
     (unwind-protect
         (let ((repo (mad-test--create-repo dir)))
           (mad-test--run-script "mad-detach" repo "main" "feat-c")
-          (pcase-let ((`(,code ,_stdout ,stderr)
+          (pcase-let ((`(,code ,stdout ,_stderr)
                        (mad-test--run-script "mad-detach" repo "main" "feat-c")))
-            (should-not (= 0 code))
-            (should (string-match-p "previous\\|already" (downcase stderr)))))
+            (should (= 0 code))
+            (let ((result (json-parse-string stdout :object-type 'alist)))
+              (should (= 0 (length (alist-get 'detached result)))))))
       (delete-directory dir t))))
 
 (ert-deftest mad-test-restore-no-state ()

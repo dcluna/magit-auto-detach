@@ -29,7 +29,8 @@ class MadDetachTest < Minitest::Test
     run_script("mad-detach", "main", "feat-c", "--repo", @repo)
     assert File.exist?(@state_file), "State file should exist"
     data = JSON.parse(File.read(@state_file))
-    assert_equal 1, data["version"]
+    assert_equal 2, data["version"]
+    assert_equal [["main", "feat-c"]], data["ranges"]
     assert_equal 3, data["entries"].length
     branches = data["entries"].map { |e| e["branch"] }
     assert_includes branches, "feat-a"
@@ -53,11 +54,34 @@ class MadDetachTest < Minitest::Test
     refute File.exist?(@state_file), "No state file for no-op"
   end
 
-  def test_refuses_with_existing_state
+  def test_incremental_detach
+    # First detach: feat-b..feat-c range (includes feat-b at base)
+    output, status = run_script("mad-detach", "feat-b", "feat-c", "--repo", @repo)
+    assert status.success?, "First detach should succeed: #{output}"
+    data = JSON.parse(File.read(@state_file))
+    assert_equal 2, data["entries"].length
+    branches = data["entries"].map { |e| e["branch"] }
+    assert_includes branches, "feat-b"
+    assert_includes branches, "feat-c"
+
+    # Second detach: broader range, should add feat-a only (feat-b already detached)
+    output, status = run_script("mad-detach", "main", "feat-b", "--repo", @repo)
+    assert status.success?, "Second detach should succeed: #{output}"
+    summary = JSON.parse(output)
+    assert_equal 1, summary["detached"].length
+    assert_equal "feat-a", summary["detached"][0]["branch"]
+
+    data = JSON.parse(File.read(@state_file))
+    assert_equal 3, data["entries"].length
+    assert_equal [["feat-b", "feat-c"], ["main", "feat-b"]], data["ranges"]
+  end
+
+  def test_second_detach_skips_already_detached
     run_script("mad-detach", "main", "feat-c", "--repo", @repo)
-    output, status, stderr = run_script("mad-detach", "main", "feat-c", "--repo", @repo)
-    refute status.success?
-    assert_match(/already exists|previous session/i, stderr)
+    output, status = run_script("mad-detach", "main", "feat-c", "--repo", @repo)
+    assert status.success?
+    summary = JSON.parse(output)
+    assert_equal 0, summary["detached"].length
   end
 
   def test_dry_run_does_not_detach

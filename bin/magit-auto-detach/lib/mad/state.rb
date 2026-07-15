@@ -3,10 +3,9 @@ require "time"
 
 module Mad
   class State
-    class AlreadyExistsError < StandardError; end
     class NotFoundError < StandardError; end
 
-    STATE_VERSION = 1
+    STATE_VERSION = 2
 
     def initialize(path)
       @path = path
@@ -16,22 +15,30 @@ module Mad
       File.exist?(@path)
     end
 
-    def create(base_ref:, tip_ref:)
-      raise AlreadyExistsError, "State file already exists: #{@path}" if exists?
-
-      data = {
-        "version" => STATE_VERSION,
-        "created_at" => Time.now.utc.iso8601,
-        "base_ref" => base_ref,
-        "tip_ref" => tip_ref,
-        "entries" => []
-      }
-      write_data(data)
+    def create_or_open(base_ref:, tip_ref:)
+      if exists?
+        add_range(base_ref, tip_ref)
+      else
+        data = {
+          "version" => STATE_VERSION,
+          "created_at" => Time.now.utc.iso8601,
+          "ranges" => [[base_ref, tip_ref]],
+          "entries" => []
+        }
+        write_data(data)
+      end
     end
 
     def read
       raise NotFoundError, "No state file at: #{@path}" unless exists?
       JSON.parse(File.read(@path))
+    end
+
+    def add_range(base_ref, tip_ref)
+      data = read
+      pair = [base_ref, tip_ref]
+      data["ranges"] << pair unless data["ranges"].include?(pair)
+      write_data(data)
     end
 
     def append_entry(worktree:, branch:)
@@ -48,6 +55,10 @@ module Mad
 
     def entries
       read["entries"]
+    end
+
+    def branches
+      entries.map { |e| e["branch"] }.to_set
     end
 
     def empty?

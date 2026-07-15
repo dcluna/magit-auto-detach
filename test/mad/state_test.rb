@@ -16,26 +16,32 @@ class Mad::StateTest < Minitest::Test
     refute @state.exists?
   end
 
-  def test_create
-    @state.create(base_ref: "main", tip_ref: "feat-c")
+  def test_create_or_open_creates_new
+    @state.create_or_open(base_ref: "main", tip_ref: "feat-c")
     assert @state.exists?
     data = @state.read
-    assert_equal 1, data["version"]
-    assert_equal "main", data["base_ref"]
-    assert_equal "feat-c", data["tip_ref"]
+    assert_equal 2, data["version"]
+    assert_equal [["main", "feat-c"]], data["ranges"]
     assert_equal [], data["entries"]
     assert data.key?("created_at")
   end
 
-  def test_create_refuses_if_exists
-    @state.create(base_ref: "main", tip_ref: "feat-c")
-    assert_raises(Mad::State::AlreadyExistsError) do
-      @state.create(base_ref: "main", tip_ref: "feat-c")
-    end
+  def test_create_or_open_merges_into_existing
+    @state.create_or_open(base_ref: "main", tip_ref: "feat-c")
+    @state.create_or_open(base_ref: "main", tip_ref: "feat-b")
+    data = @state.read
+    assert_equal [["main", "feat-c"], ["main", "feat-b"]], data["ranges"]
+  end
+
+  def test_create_or_open_deduplicates_ranges
+    @state.create_or_open(base_ref: "main", tip_ref: "feat-c")
+    @state.create_or_open(base_ref: "main", tip_ref: "feat-c")
+    data = @state.read
+    assert_equal [["main", "feat-c"]], data["ranges"]
   end
 
   def test_append_entry
-    @state.create(base_ref: "main", tip_ref: "feat-c")
+    @state.create_or_open(base_ref: "main", tip_ref: "feat-c")
     @state.append_entry(worktree: "/path/wt-a", branch: "feat-a")
     data = @state.read
     assert_equal 1, data["entries"].length
@@ -44,7 +50,7 @@ class Mad::StateTest < Minitest::Test
   end
 
   def test_append_multiple_entries
-    @state.create(base_ref: "main", tip_ref: "feat-c")
+    @state.create_or_open(base_ref: "main", tip_ref: "feat-c")
     @state.append_entry(worktree: "/path/wt-a", branch: "feat-a")
     @state.append_entry(worktree: "/path/wt-b", branch: "feat-b")
     data = @state.read
@@ -52,7 +58,7 @@ class Mad::StateTest < Minitest::Test
   end
 
   def test_remove_entry
-    @state.create(base_ref: "main", tip_ref: "feat-c")
+    @state.create_or_open(base_ref: "main", tip_ref: "feat-c")
     @state.append_entry(worktree: "/path/wt-a", branch: "feat-a")
     @state.append_entry(worktree: "/path/wt-b", branch: "feat-b")
     @state.remove_entry("/path/wt-a")
@@ -68,13 +74,13 @@ class Mad::StateTest < Minitest::Test
   end
 
   def test_delete
-    @state.create(base_ref: "main", tip_ref: "feat-c")
+    @state.create_or_open(base_ref: "main", tip_ref: "feat-c")
     @state.delete
     refute @state.exists?
   end
 
   def test_entries
-    @state.create(base_ref: "main", tip_ref: "feat-c")
+    @state.create_or_open(base_ref: "main", tip_ref: "feat-c")
     @state.append_entry(worktree: "/path/wt-a", branch: "feat-a")
     entries = @state.entries
     assert_equal 1, entries.length
@@ -82,9 +88,19 @@ class Mad::StateTest < Minitest::Test
   end
 
   def test_empty_check
-    @state.create(base_ref: "main", tip_ref: "feat-c")
+    @state.create_or_open(base_ref: "main", tip_ref: "feat-c")
     assert @state.empty?
     @state.append_entry(worktree: "/path/wt-a", branch: "feat-a")
     refute @state.empty?
+  end
+
+  def test_branches
+    @state.create_or_open(base_ref: "main", tip_ref: "feat-c")
+    @state.append_entry(worktree: "/path/wt-a", branch: "feat-a")
+    @state.append_entry(worktree: "/path/wt-b", branch: "feat-b")
+    branches = @state.branches
+    assert_includes branches, "feat-a"
+    assert_includes branches, "feat-b"
+    assert_equal 2, branches.size
   end
 end
