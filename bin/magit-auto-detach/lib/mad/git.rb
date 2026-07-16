@@ -62,11 +62,29 @@ module Mad
     end
 
     def checkout_detach(worktree_path)
-      run_in(worktree_path, "checkout", "--detach")
+      _stdout, stderr, status = Open3.capture3("git", "-C", worktree_path, "checkout", "--detach")
+      return if detached?(worktree_path)
+      raise CommandError, "git checkout --detach in #{worktree_path} failed: #{stderr}" unless status.success?
     end
 
     def checkout_branch(worktree_path, branch)
-      run_in(worktree_path, "checkout", branch)
+      _stdout, stderr, status = Open3.capture3("git", "-C", worktree_path, "checkout", branch)
+      actual = current_branch(worktree_path)
+      return if actual == branch
+      raise CommandError, "git checkout #{branch} in #{worktree_path} failed: #{stderr}" unless status.success?
+      raise CommandError, "git checkout #{branch} in #{worktree_path} failed: HEAD on #{actual || 'detached'}, not #{branch}"
+    end
+
+    def detached?(worktree_path)
+      _stdout, stderr, status = Open3.capture3("git", "-C", worktree_path, "symbolic-ref", "HEAD")
+      return false if status.success?
+      return true if stderr.include?("not a symbolic ref")
+      raise CommandError, "git symbolic-ref in #{worktree_path} failed: #{stderr}"
+    end
+
+    def current_branch(worktree_path)
+      stdout, status = Open3.capture2("git", "-C", worktree_path, "symbolic-ref", "--short", "HEAD")
+      status.success? ? stdout.strip : nil
     end
 
     private
